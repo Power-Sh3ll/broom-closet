@@ -17,6 +17,82 @@ your input line stays pinned to the bottom while messages scroll above it.
 > _
 ```
 
+## How it fits together
+
+```mermaid
+flowchart TB
+    subgraph joiners["Joiners (any OS)"]
+        C1["client.py<br/>pinned input line<br/>HMAC auth"]
+        C2["nc / telnet<br/>plain lines<br/>cleartext passphrase"]
+    end
+
+    subgraph net["Tailscale tailnet - WireGuard encrypted"]
+        TS(("100.x.y.z<br/>port 7777"))
+    end
+
+    subgraph host["Host machine"]
+        SEC[("~/.closet-secret<br/>mode 600")]
+        subgraph srv["server.py - one asyncio event loop"]
+            ACC["start_server<br/>accept loop"]
+            TASK["serve task<br/>one per connection"]
+            AUTH["authenticate<br/>nonce + HMAC-SHA256"]
+            READ["read_line<br/>2 KB cap, token bucket"]
+            CMD["command<br/>slash commands"]
+            ROOM[["Room<br/>members set<br/>history deque, 80 lines"]]
+        end
+    end
+
+    C1 -->|"TCP, newline-delimited UTF-8"| TS
+    C2 --> TS
+    TS --> ACC
+    ACC -->|"spawns"| TASK
+    TASK --> AUTH
+    AUTH -.->|"reads once"| SEC
+    AUTH -->|"accepted"| READ
+    READ -->|"starts with /"| CMD
+    READ -->|"chat line"| ROOM
+    CMD --> ROOM
+    ROOM ==>|"fan out to every member"| C1
+    ROOM ==> C2
+```
+
+There is no database, no worker pool, and no thread per client. One event
+loop runs one `serve` task per connection; they all share a single `Room`
+object holding the member set and an 80-line history deque. "Broadcast" is
+just a loop over that set writing to each transport, which is why the whole
+server is one file.
+
+The passphrase is read from disk once at startup. It is never sent to anyone,
+in either direction:
+
+```mermaid
+sequenceDiagram
+    participant C as client.py
+    participant S as server.py
+
+    C->>S: TCP connect
+    S->>C: AUTH 4f8a1c... (fresh 32-hex nonce)
+    Note over C: passphrase from --secret-file,<br/>$CLOSET_SECRET, or a hidden prompt
+    C->>S: hmac:HMAC-SHA256(secret, nonce)
+    Note over S: compare_digest, constant time
+
+    alt answer matches
+        S->>C: + auth ok
+        S->>C: pick a nick:
+        C->>S: ada
+        S->>C: last 80 lines of scrollback
+        S->>C: here now: grace, hopper
+        S-->>C: broadcast - ada joined
+    else wrong, up to 3 tries
+        S->>C: ! wrong passphrase
+        Note over S: sleep 1s, 2s, 3s<br/>then disconnect
+    end
+```
+
+A captured reply is useless against the next nonce, so the handshake is not
+replayable. The `nc` route skips the HMAC and sends the passphrase as one
+plain line, which is why it is only safe inside Tailscale or an SSH tunnel.
+
 ## Requirements
 
 - **Python 3.9+.** That is the whole list — no pip packages, standard library
