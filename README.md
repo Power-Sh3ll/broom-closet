@@ -23,8 +23,9 @@ your input line stays pinned to the bottom while messages scroll above it.
   only.
 - **Linux and macOS** get the full client: pinned input line, arrow-key
   history, colored nicks.
-- **Windows** falls back to plain line-at-a-time input, because raw terminal
-  input is POSIX-only. Use WSL for the real experience.
+- **Windows** has its own installer (see below) and falls back to plain
+  line-at-a-time input, because raw terminal input is POSIX-only. WSL gets the
+  full experience.
 - Any machine with `nc` can join with nothing installed at all.
 
 ## Try it locally first
@@ -68,6 +69,36 @@ scripts/install-client.sh --host 100.x.y.z              # prompts for the passph
 CLOSET_SECRET='...' scripts/install-client.sh --host 100.x.y.z   # unattended
 scripts/install-client.sh --host 192.168.1.50 --lan     # same network, no VPN
 ```
+
+On **Windows**, use the PowerShell installer instead — the bash scripts do
+nothing in cmd.exe or PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install-client.ps1 -ServerHost 100.x.y.z
+```
+
+The `-ExecutionPolicy Bypass` is needed because Windows blocks unsigned
+scripts by default; without it the script refuses to run. It needs no admin
+rights, installs to `%LOCALAPPDATA%\broom-closet`, locks the passphrase down
+with `icacls` so only your account can read it, and puts a `closet` command on
+your user PATH. **Open a new terminal** before `closet` is recognized.
+
+Windows does not ship Python, and typing `python` usually just opens the
+Microsoft Store. Install the real thing from
+<https://www.python.org/downloads/windows/> with **"Add python.exe to PATH"**
+ticked, or `winget install --id Python.Python.3.12`. The installer detects
+`py -3`, `python`, and `python3`, rejects anything below 3.9, and tells you
+what to do if none works.
+
+Undo it with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-client.ps1
+```
+
+Native Windows gets the simpler client: type a line, press Enter, no pinned
+input line or arrow-key history. For the real thing, run `wsl --install` and
+use the bash installer inside WSL.
 
 Taildrop is the easiest way to move those two files once Tailscale is up on
 both ends:
@@ -293,6 +324,24 @@ Compare them exactly — a trailing newline matters, which is why the scripts us
 `printf` rather than `echo`. Delete `~/.closet-secret` and re-run the client
 installer to re-enter it.
 
+**An install script exits without explaining itself.** It should not any more
+— every script reports the failing line, command, and exit code. For the full
+picture, re-run with `--trace`:
+
+```sh
+bash scripts/install-server.sh --trace
+```
+
+Steps that need `sudo` ask for your password once, up front, before anything
+else happens. If `pacman` cannot find `tailscale`, your package database is
+stale: run a **full** upgrade with `sudo pacman -Syu` and try again. Never
+`pacman -Sy <package>` on Arch — partial upgrades break systems.
+
+**On Windows, the script "is not digitally signed" or exits immediately.**
+Windows blocks unsigned scripts. Run it as
+`powershell -ExecutionPolicy Bypass -File .\scripts\install-client.ps1 ...`
+rather than double-clicking it.
+
 **Garbled display or no pinned input line.** You are in the fallback mode: not a
 TTY, or on native Windows. Use WSL on Windows.
 
@@ -312,6 +361,8 @@ scripts/install-server.sh      host setup: passphrase, Tailscale, firewall, serv
 scripts/uninstall-server.sh    undoes the above
 scripts/install-client.sh      joiner setup: client.py, passphrase, `closet` command
 scripts/uninstall-client.sh    undoes the above
+scripts/install-client.ps1     the same, for Windows without WSL
+scripts/uninstall-client.ps1   undoes the above
 ```
 
 Server options: `--host`, `--port`, `--motd`, `--secret-file`.

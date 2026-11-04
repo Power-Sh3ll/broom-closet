@@ -6,6 +6,11 @@
 # destructive step asks first unless --yes is given.
 set -euo pipefail
 
+if [ -z "${BASH_VERSION:-}" ]; then
+	echo "run this with bash, not sh:  bash $0" >&2
+	exit 2
+fi
+
 SECRET="${CLOSET_SECRET_FILE:-$HOME/.closet-secret}"
 UNIT=/etc/systemd/system/broom-closet.service
 ASSUME_YES=0
@@ -17,6 +22,7 @@ usage: uninstall-server.sh [options]
 
   --tailscale   also log out, disable, and uninstall Tailscale
   --yes         do not ask for confirmation
+  --trace       print every command as it runs (for debugging)
   -h, --help    this text
 USAGE
 }
@@ -25,6 +31,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--tailscale) REMOVE_TAILSCALE=1 ;;
 		--yes|-y) ASSUME_YES=1 ;;
+		--trace) set -x ;;
 		-h|--help) usage; exit 0 ;;
 		*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
 	esac
@@ -33,6 +40,22 @@ done
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
+
+# Intentional exits go through this so they are not reported as crashes.
+bail() { trap - ERR; exit "${1:-1}"; }
+
+on_error() {
+	local code=$? line="$1" cmd="$2"
+	trap - ERR
+	printf '\n\033[31m!! %s failed\033[0m\n' "$(basename "$0")" >&2
+	printf '   line:    %s\n' "$line" >&2
+	printf '   command: %s\n' "$cmd" >&2
+	printf '   exit:    %s\n' "$code" >&2
+	printf '   for a full trace:  bash %s --trace %s\n' "$0" "${ORIG_ARGS:-}" >&2
+	exit "$code"
+}
+ORIG_ARGS="$*"
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
 confirm() {
 	[ "$ASSUME_YES" -eq 1 ] && return 0

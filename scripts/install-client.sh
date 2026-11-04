@@ -7,6 +7,11 @@
 # except Tailscale, which is optional and asked about separately.
 set -euo pipefail
 
+if [ -z "${BASH_VERSION:-}" ]; then
+	echo "run this with bash, not sh:  bash $0" >&2
+	exit 2
+fi
+
 BINDIR="$HOME/.local/bin"
 LIBDIR="$HOME/.local/share/broom-closet"
 SECRET="$HOME/.closet-secret"
@@ -22,6 +27,7 @@ usage: install-client.sh --host <address> [options]
   --port <n>       default 7777
   --lan            same-network setup; skip Tailscale entirely
   --no-tailscale   alias for --lan
+  --trace          print every command as it runs (for debugging)
   -h, --help       this text
 
 You will be prompted for the shared passphrase. Get it from whoever runs the
@@ -35,6 +41,7 @@ while [ $# -gt 0 ]; do
 		--host) HOST="${2:?--host needs a value}"; shift ;;
 		--port) PORT="${2:?--port needs a value}"; shift ;;
 		--lan|--no-tailscale) WANT_TAILSCALE=0 ;;
+		--trace) set -x ;;
 		-h|--help) usage; exit 0 ;;
 		*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
 	esac
@@ -44,6 +51,22 @@ done
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 warn() { printf '\033[33m    ! %s\033[0m\n' "$*"; }
+
+# Intentional exits go through this so they are not reported as crashes.
+bail() { trap - ERR; exit "${1:-1}"; }
+
+on_error() {
+	local code=$? line="$1" cmd="$2"
+	trap - ERR
+	printf '\n\033[31m!! %s failed\033[0m\n' "$(basename "$0")" >&2
+	printf '   line:    %s\n' "$line" >&2
+	printf '   command: %s\n' "$cmd" >&2
+	printf '   exit:    %s\n' "$code" >&2
+	printf '   for a full trace:  bash %s --trace %s\n' "$0" "${ORIG_ARGS:-}" >&2
+	exit "$code"
+}
+ORIG_ARGS="$*"
+trap 'on_error "$LINENO" "$BASH_COMMAND"' ERR
 
 if [ -z "$HOST" ]; then
 	echo "error: --host is required" >&2
@@ -63,7 +86,7 @@ python3 is not installed. Install it, then re-run this script:
   Fedora          sudo dnf install python3
   macOS           brew install python    (or install Xcode command line tools)
 MSG
-	exit 1
+	bail 1
 fi
 python3 - <<'PY' || exit 1
 import sys
@@ -83,7 +106,7 @@ done
 if [ -z "$SRC" ]; then
 	echo "error: cannot find client.py next to this script or one level up." >&2
 	echo "Copy client.py into $HERE and re-run." >&2
-	exit 1
+	bail 1
 fi
 
 mkdir -p "$LIBDIR" "$BINDIR"
